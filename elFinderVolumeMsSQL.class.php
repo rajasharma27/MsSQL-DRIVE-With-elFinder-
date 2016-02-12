@@ -7,7 +7,7 @@
  * @author Raja Sharma - updating for MsSQL
  **/
 class elFinderVolumeMsSQL extends elFinderVolumeDriver {
-	
+
 	/**
 	 * Driver id
 	 * Must be started from letter and contains [a-z0-9]
@@ -16,21 +16,21 @@ class elFinderVolumeMsSQL extends elFinderVolumeDriver {
 	 * @var string
 	 **/
 	protected $driverId = 'ms';
-	
+
 	/**
 	 * Database object
 	 *
 	 * @var odbc_connect
 	 **/
-	protected $db = null;
-	
+	protected $conn = null;
+
 	/**
 	 * Tables to store files
 	 *
 	 * @var string
 	 **/
 	protected $tbf = '';
-	
+
 	/**
 	 * Directory for tmp files
 	 * If not set driver will try to use tmbDir as tmpDir
@@ -38,21 +38,21 @@ class elFinderVolumeMsSQL extends elFinderVolumeDriver {
 	 * @var string
 	 **/
 	protected $tmpPath = '';
-	
+
 	/**
 	 * Numbers of sql requests (for debug)
 	 *
 	 * @var int
 	 **/
 	protected $sqlCnt = 0;
-	
+
 	/**
 	 * Last db error message
 	 *
 	 * @var string
 	 **/
 	protected $dbError = '';
-	
+		
 	/**
 	 * Constructor
 	 * Extend options with required fields
@@ -62,32 +62,25 @@ class elFinderVolumeMsSQL extends elFinderVolumeDriver {
 	 **/
 	public function __construct() {
 		$opts = array(
-			'host'          => 'localhost',
-			'user'          => '',
-			'pass'          => '',
-			'db'            => '',
-			'port'          => null,
-			'socket'        => null,
-			'files_table'   => 'elfinder_file',
-			'alias'			=> 'DATABASE',
-			'tmbPath'       => '',
-			'tmpPath'       => '',
-			'defaults'     => array(
-			'read'   => true,
-			'write'  => true,
-			'locked' => false,
-			'hidden' => false
-			),
-			'rootCssClass'  => 'elfinder-navbar-root-sql'
+			'host'			=> 'localhost',
+			'user'			=> '',
+			'pass'			=> '',
+			'db'			=> '',
+			'port'			=> null,
+			'socket'		=> null,
+			'files_table'	=> 'elfinder_file',
+			'tmbPath'		=> '',
+			'tmpPath'		=> '',
+			'rootCssClass'	=> 'elfinder-navbar-root-sql'
 		);
 		$this->options = array_merge($this->options, $opts);
 		$this->options['mimeDetect'] = 'internal';
 	}
-	
+
 	/*********************************************************************/
-	/*                        INIT AND CONFIGURE                         */
+	/*						  INIT AND CONFIGURE						 */
 	/*********************************************************************/
-	
+
 	/**
 	 * Prepare driver before mount volume.
 	 * Connect to db, check required tables and fetch root path
@@ -96,29 +89,29 @@ class elFinderVolumeMsSQL extends elFinderVolumeDriver {
 	 * @author Dmitry (dio) Levashov
 	 **/
 	protected function init() {
-		
+
 		if (!($this->options['host'])
-		||  !$this->options['user'] 
-		||  !$this->options['pass'] 
-		||  !$this->options['db']
-		||  !$this->options['path']
-		||  !$this->options['files_table']) {
-			return false;
-		}		
-		
-		
-		$this->db = odbc_connect("Driver={SQL Server};Server=".$this->options['host'].";Database=$database;", $this->options['user'], $this->options['pass']);
-		
-		if (odbc_errormsg($this->db)) {
+		||	!$this->options['user']
+		||	!$this->options['pass']
+		||	!$this->options['db']
+		||	!$this->options['path']
+		||	!$this->options['files_table']) {
 			return false;
 		}
-		
+
+
+		$this->conn = odbc_connect("Driver={SQL Server};Server=".$this->options['host'].";Database=$database;", $this->options['user'], $this->options['pass']);
+
+		if (odbc_errormsg($this->conn)) {
+			return false;
+		}
+
 		$this->rootparameter($this->options['alias'], $this->options['defaults']['read'], $this->options['defaults']['write'], $this->options['defaults']['locked'], $this->options['defaults']['hidden']);
-				
-		if ($res = odbc_fetch_array(odbc_exec($this->db,'SELECT name FROM sys.tables'))) {		
-			while ($row =  odbc_fetch_array(odbc_exec($this->db,'SELECT name FROM sys.tables'))) {
-				if ($row['name'] == $this->options['files_table']) {				
-					$this->tbf = $this->options['files_table'];					
+
+		if ($res = $this->query('SELECT name FROM sys.tables')) {
+			while ($row =  odbc_fetch_array($res)) {
+				if ($row['name'] == $this->options['files_table']) {
+					$this->tbf = $this->options['files_table'];
 					break;
 				}
 			}
@@ -132,8 +125,6 @@ class elFinderVolumeMsSQL extends elFinderVolumeDriver {
 
 		return true;
 	}
-
-
 
 	/**
 	 * Set tmp path
@@ -150,17 +141,20 @@ class elFinderVolumeMsSQL extends elFinderVolumeDriver {
 					@chmod($tmp, $this->options['tmbPathMode']);
 				}
 			}
-			
+
 			$this->tmpPath = is_dir($tmp) && is_writable($tmp) ? $tmp : false;
 		}
-		
+		if (!$this->tmpPath && ($tmp = elFinder::getStaticVar('commonTempPath'))) {
+			$this->tmpPath = $tmp;
+		}
+
 		if (!$this->tmpPath && $this->tmbPath && $this->tmbPathWritable) {
 			$this->tmpPath = $this->tmbPath;
 		}
 
 		$this->mimeDetect = 'internal';
 	}
-	
+
 	/**
 	 * Close connection
 	 *
@@ -168,9 +162,9 @@ class elFinderVolumeMsSQL extends elFinderVolumeDriver {
 	 * @author Dmitry (dio) Levashov
 	 **/
 	public function umount() {
-		odbc_close ($this->db );
+		odbc_close ($this->conn);
 	}
-	
+
 	/**
 	 * Return debug info for client
 	 *
@@ -190,17 +184,26 @@ class elFinderVolumeMsSQL extends elFinderVolumeDriver {
 	 * Perform sql query and return result.
 	 * Increase sqlCnt and save error if occured
 	 *
-	 * @param  string  $sql  query
+
+	 * @param  string  $sql	 query
 	 * @return misc
 	 * @author Dmitry (dio) Levashov
 	 **/
 	protected function query($sql) {
-		//$this->sqlCnt++;
-//		$res = $this->db->query($sql);
-//		if (!$res) {
-//			$this->dbError = $this->db->error;
-//		}
-//		return $res;
+	 /**
+	 * increase mssql or odbc data size limit
+	 **/
+		ini_set("mssql.textlimit","2147483647");
+		ini_set("mssql.textsize","2147483647");
+		ini_set("odbc.defaultlrl","214748364");
+		
+		$this->sqlCnt++;
+		$sql = str_replace(utf8_encode('"'), "'", $sql);
+		$res = odbc_exec($this->conn, $sql);
+		if (!$res) {
+			$this->dbError = odbc_errormsg($this->conn);
+		}
+		return $res;
 	}
 
 	/**
@@ -215,15 +218,14 @@ class elFinderVolumeMsSQL extends elFinderVolumeDriver {
 	protected function make($path, $name, $mime) {
 		$sql = 'INSERT INTO %s (parent_id, name, size, mtime, mime, content, [read], write, locked, hidden, width, height) VALUES ("%s", "%s", 0, %d, "%s", convert(varbinary(max),""), "%d", "%d", 0, 0, 0, 0)';
 		$sql = sprintf($sql, $this->tbf, $path, addslashes($name), time(), $mime, $this->defaults['read'], $this->defaults['write']);
-		$sql = str_replace(utf8_encode('"'), "'", $sql); 			
-		$res=odbc_exec($this->db,$sql);		
-		return  $res && odbc_num_rows($res) > 0;
+		$res = $this->query($sql);
+		return $res && odbc_num_rows($res) > 0;
 	}
 
 	/*********************************************************************/
-	/*                               FS API                              */
+	/*								 FS API								 */
 	/*********************************************************************/
-	
+
 	/**
 	 * Cache dir contents
 	 *
@@ -234,47 +236,46 @@ class elFinderVolumeMsSQL extends elFinderVolumeDriver {
 	protected function cacheDir($path) {
 		$this->dirsCache[$path] = array();
 
-		$sql = 'SELECT f.id, f.parent_id, f.name, f.size, f.mtime AS ts, f.mime, f.[read], f.write, f.locked, f.hidden, f.width, f.height, IIF(ch.id>0, 1, 0) AS dirs 
-				FROM '.$this->tbf.' AS f 
+		$sql = 'SELECT f.id, f.parent_id, f.name, f.size, f.mtime AS ts, f.mime, f.[read], f.write, f.locked, f.hidden, f.width, f.height, IIF(ch.id>0, 1, 0) AS dirs
+				FROM '.$this->tbf.' AS f
 				LEFT JOIN '.$this->tbf.' AS ch ON ch.parent_id=f.id AND ch.mime="directory"
-				WHERE f.parent_id="'.$path.'"';				
+				WHERE f.parent_id="'.$path.'"';
 				//GROUP BY f.id';
-				
-				$sql = str_replace(utf8_encode('"'), "'", $sql); 			
-		$res = odbc_exec($this->db,$sql); 
-;
+
+		$res = $this->query($sql);
+
 		if ($res) {
-			while ($row = odbc_fetch_array($res)) {			
+			while ($row = odbc_fetch_array($res)) {
 				$id = $row['id'];
 				if ($row['parent_id']) {
 					$row['phash'] = $this->encode($row['parent_id']);
-				} 
-				
+				}
+
 				if ($row['mime'] == 'directory') {
 					unset($row['width']);
 					unset($row['height']);
 				} else {
 					unset($row['dirs']);
 				}
-				
+
 				unset($row['id']);
 				unset($row['parent_id']);
-				
-				
-				
+
+
+
 				if (($stat = $this->updateCache($id, $row)) && empty($stat['hidden'])) {
 					$this->dirsCache[$path][] = $id;
 				}
 			}
 		}
-		
+
 		return $this->dirsCache[$path];
 	}
 
 	/**
 	 * Return array of parents paths (ids)
 	 *
-	 * @param  int   $path  file path (id)
+	 * @param  int	 $path	file path (id)
 	 * @return array
 	 * @author Dmitry (dio) Levashov
 	 **/
@@ -287,7 +288,7 @@ class elFinderVolumeMsSQL extends elFinderVolumeDriver {
 				$path = isset($file['phash']) ? $this->decode($file['phash']) : false;
 			}
 		}
-		
+
 		if (count($parents)) {
 			array_pop($parents);
 		}
@@ -297,7 +298,7 @@ class elFinderVolumeMsSQL extends elFinderVolumeDriver {
 	/**
 	 * Return correct file path for LOAD_FILE method
 	 *
-	 * @param  string $path  file path (id)
+	 * @param  string $path	 file path (id)
 	 * @return string
 	 * @author Troex Nevelin
 	 **/
@@ -313,7 +314,7 @@ class elFinderVolumeMsSQL extends elFinderVolumeDriver {
 	 * Recursive files search
 	 *
 	 * @param  string  $path   dir path
-	 * @param  string  $q      search string
+	 * @param  string  $q	   search string
 	 * @param  array   $mimes
 	 * @return array
 	 * @author Dmitry (dio) Levashov
@@ -321,7 +322,7 @@ class elFinderVolumeMsSQL extends elFinderVolumeDriver {
 	protected function doSearch($path, $q, $mimes) {
 		$dirs = array();
 		$timeout = $this->options['searchTimeout']? $this->searchStart + $this->options['searchTimeout'] : 0;
-		
+
 		if ($path != $this->root) {
 			$inpath = array(intval($path));
 			while($inpath) {
@@ -329,9 +330,8 @@ class elFinderVolumeMsSQL extends elFinderVolumeDriver {
 				$inpath = array();
 				$sql = 'SELECT f.id FROM %s AS f WHERE f.parent_id IN '.$in.' AND mime = \'directory\'';
 				$sql = sprintf($sql, $this->tbf);
-				$sql = str_replace(utf8_encode('"'), "'", $sql); 
 
-				if ($res = odbc_exec($this->db,$sql)) {
+				if ($res = $this->query($sql)) {
 					$_dir = array();
 					while ($dat = odbc_fetch_array($res)) {
 						$inpath[] = $dat['id'];
@@ -342,16 +342,14 @@ class elFinderVolumeMsSQL extends elFinderVolumeDriver {
 		}
 
 		$result = array();
-		
+
 		if ($mimes) {
 			$whrs = array();
 			foreach($mimes as $mime) {
 				if (strpos($mime, '/') === false) {
 					$whrs[] = sprintf('f.mime LIKE "%s/%%"', addslashes($mime));
-					
 				} else {
 					$whrs[] = sprintf('f.mime = "%s"', addslashes($mime));
-					
 				}
 			}
 			$whr = join(' OR ', $whrs);
@@ -361,28 +359,27 @@ class elFinderVolumeMsSQL extends elFinderVolumeDriver {
 		if ($dirs) {
 			$whr = '(' . $whr . ') AND (`parent_id` IN (' . join(',', $dirs) . '))';
 		}
-		
-		$sql = 'SELECT f.id, f.parent_id, f.name, f.size, f.mtime AS ts, f.mime, f.[read], f.write, f.locked, f.hidden, f.width, f.height, 0 AS dirs 
-				FROM %s AS f 
-				WHERE %s';
-		
-		$sql = sprintf($sql, $this->tbf, $whr);
-		$sql = str_replace(utf8_encode('"'), "'", $sql); 
 
-		if (($res = odbc_exec($this->db,$sql))) {
+		$sql = 'SELECT f.id, f.parent_id, f.name, f.size, f.mtime AS ts, f.mime, f.[read], f.write, f.locked, f.hidden, f.width, f.height, 0 AS dirs
+				FROM %s AS f
+				WHERE %s';
+
+		$sql = sprintf($sql, $this->tbf, $whr);
+
+		if ($res = $this->query($sql)) {
 			while ($row = odbc_fetch_array($res)) {
 				if ($timeout && $timeout < time()) {
 					$this->setError(elFinder::ERROR_SEARCH_TIMEOUT, $this->path($this->encode($path)));
 					break;
 				}
-				
+
 				if (!$this->mimeAccepted($row['mime'], $mimes)) {
 					continue;
 				}
 				$id = $row['id'];
 				if ($row['parent_id']) {
 					$row['phash'] = $this->encode($row['parent_id']);
-				} 
+				}
 				$row['path'] = $this->_path($id);
 
 				if ($row['mime'] == 'directory') {
@@ -400,13 +397,13 @@ class elFinderVolumeMsSQL extends elFinderVolumeDriver {
 				}
 			}
 		}
-		
+
 		return $result;
 	}
 
 
 	/*********************** paths/urls *************************/
-	
+
 	/**
 	 * Return parent directory path
 	 *
@@ -439,15 +436,14 @@ class elFinderVolumeMsSQL extends elFinderVolumeDriver {
 	 **/
 	protected function _joinPath($dir, $name) {
 		$sql = 'SELECT id FROM '.$this->tbf.' WHERE parent_id="'.$dir.'" AND name="'.addslashes($name).'"';
-		$sql = str_replace(utf8_encode('"'), "'", $sql); 		
-		$res = odbc_exec($this->db,$sql);		
-		if (($res) && ($r = odbc_fetch_array($res))) {
+		$res = $this->query($sql);
+		if ($res && ($r = odbc_fetch_array($res))) {
 			$this->updateCache($r['id'], $this->_stat($r['id']));
 			return $r['id'];
 		}
 		return -1;
 	}
-	
+
 	/**
 	 * Return normalized path, this works the same as os.path.normpath() in Python
 	 *
@@ -458,7 +454,7 @@ class elFinderVolumeMsSQL extends elFinderVolumeDriver {
 	protected function _normpath($path) {
 		return $path;
 	}
-	
+
 	/**
 	 * Return file path related to root dir
 	 *
@@ -469,7 +465,7 @@ class elFinderVolumeMsSQL extends elFinderVolumeDriver {
 	protected function _relpath($path) {
 		return $path;
 	}
-	
+
 	/**
 	 * Convert path related to root dir into real path
 	 *
@@ -480,7 +476,7 @@ class elFinderVolumeMsSQL extends elFinderVolumeDriver {
 	protected function _abspath($path) {
 		return $path;
 	}
-	
+
 	/**
 	 * Return fake path started from root dir
 	 *
@@ -492,21 +488,21 @@ class elFinderVolumeMsSQL extends elFinderVolumeDriver {
 		if (($file = $this->stat($path)) == false) {
 			return '';
 		}
-		
+
 		$parentsIds = $this->getParents($path);
 		$path = '';
 		foreach ($parentsIds as $id) {
 			$dir = $this->stat($id);
 			$path .= $dir['name'].$this->separator;
 		}
-		return $this->rootName.$this->separator.$path.$file['name'];
+		return $path.$file['name'];
 	}
-	
+
 	/**
 	 * Return true if $path is children of $parent
 	 *
-	 * @param  string  $path    path to check
-	 * @param  string  $parent  parent path
+	 * @param  string  $path	path to check
+	 * @param  string  $parent	parent path
 	 * @return bool
 	 * @author Dmitry (dio) Levashov
 	 **/
@@ -515,45 +511,42 @@ class elFinderVolumeMsSQL extends elFinderVolumeDriver {
 			? true
 			: in_array($parent, $this->getParents($path));
 	}
-	
+
 	/***************** file stat ********************/
 	/**
 	 * Return stat for given path.
 	 * Stat contains following fields:
-	 * - (int)    size    file size in b. required
-	 * - (int)    ts      file modification time in unix time. required
-	 * - (string) mime    mimetype. required for folders, others - optionally
-	 * - (bool)   read    read permissions. required
-	 * - (bool)   write   write permissions. required
-	 * - (bool)   locked  is object locked. optionally
-	 * - (bool)   hidden  is object hidden. optionally
-	 * - (string) alias   for symlinks - link target path relative to root path. optionally
+	 * - (int)	  size	  file size in b. required
+	 * - (int)	  ts	  file modification time in unix time. required
+	 * - (string) mime	  mimetype. required for folders, others - optionally
+	 * - (bool)	  read	  read permissions. required
+	 * - (bool)	  write	  write permissions. required
+	 * - (bool)	  locked  is object locked. optionally
+	 * - (bool)	  hidden  is object hidden. optionally
+	 * - (string) alias	  for symlinks - link target path relative to root path. optionally
 	 * - (string) target  for symlinks - link target path. optionally
 	 *
 	 * If file does not exists - returns empty array or false.
 	 *
-	 * @param  string  $path    file path 
+	 * @param  string  $path	file path
 	 * @return array|false
 	 * @author Dmitry (dio) Levashov
 	 **/
-	protected function _stat($path) {
-		//$sql = 'SELECT f.id, f.parent_id, f.name, f.size, f.mtime AS ts, f.mime, f.read, f.write, f.locked, f.hidden, f.width, f.height, IF(ch.id, 1, 0) AS dirs
+	protected function _stat($path) {		
 		$sql = 'SELECT f.id, f.parent_id, f.name, f.size, f.mtime AS ts, f.mime, f.[read], f.write, f.locked, f.hidden, f.width, f.height, IIF(ch.id>0, 1, 0) AS dirs
-				FROM '.$this->tbf.' AS f 
+				FROM '.$this->tbf.' AS f
 				LEFT JOIN '.$this->tbf.' AS p ON p.id=f.parent_id
 				LEFT JOIN '.$this->tbf.' AS ch ON ch.parent_id=f.id AND ch.mime="directory"
 				WHERE f.id="'.$path.'"';
-				//GROUP BY f.id';			
-				$sql = str_replace(utf8_encode('"'), "'", $sql); 
-				
-		$res = odbc_exec($this->db,$sql);
+				//GROUP BY f.id';
+
+		$res = $this->query($sql);
+
 		if ($res) {
-			
 			$stat = odbc_fetch_array($res);
-			
 			if ($stat['parent_id']) {
 				$stat['phash'] = $this->encode($stat['parent_id']);
-			} 			
+			}
 			if ($stat['mime'] == 'directory') {
 				unset($stat['width']);
 				unset($stat['height']);
@@ -563,11 +556,11 @@ class elFinderVolumeMsSQL extends elFinderVolumeDriver {
 			unset($stat['id']);
 			unset($stat['parent_id']);
 			return $stat;
-			
+
 		}
 		return array();
 	}
-	
+
 	/**
 	 * Return true if path is dir and has at least one childs directory
 	 *
@@ -578,7 +571,7 @@ class elFinderVolumeMsSQL extends elFinderVolumeDriver {
 	protected function _subdirs($path) {
 		return ($stat = $this->stat($path)) && isset($stat['dirs']) ? $stat['dirs'] : false;
 	}
-	
+
 	/**
 	 * Return object width and height
 	 * Usualy used for images, but can be realize for video etc...
@@ -591,9 +584,9 @@ class elFinderVolumeMsSQL extends elFinderVolumeDriver {
 	protected function _dimensions($path, $mime) {
 		return ($stat = $this->stat($path)) && isset($stat['width']) && isset($stat['height']) ? $stat['width'].'x'.$stat['height'] : '';
 	}
-	
+
 	/******************** file/dir content *********************/
-		
+
 	/**
 	 * Return files list in directory.
 	 *
@@ -606,7 +599,7 @@ class elFinderVolumeMsSQL extends elFinderVolumeDriver {
 			? $this->dirsCache[$path]
 			: $this->cacheDir($path);
 	}
-		
+
 	/**
 	 * Open file and return file pointer
 	 *
@@ -615,31 +608,30 @@ class elFinderVolumeMsSQL extends elFinderVolumeDriver {
 	 * @return resource|false
 	 * @author Dmitry (dio) Levashov
 	 **/
-	protected function _fopen($path, $mode='rb') {		
+	protected function _fopen($path, $mode='rb') {
 		$fp = $this->tmbPath
 			? @fopen($this->getTempFile($path), 'w+')
-			: @tmpfile();		
-		
+			: @tmpfile();
+
 		if ($fp) {
-				$sql = 'SELECT convert(varchar(max),content) as content FROM '.$this->tbf.' WHERE id="'.$path.'"';				
-				$sql = str_replace(utf8_encode('"'), "'", $sql);								
-				$res = odbc_exec($this->db,$sql);
-			if (($res)
-			&& ($r = odbc_fetch_array($res))) {							
+			$sql = 'SELECT convert(varbinary(max),content) as content FROM '.$this->tbf.' WHERE id="'.$path.'"';
+			$res = $this->query($sql);
+			if ($res && ($r = odbc_fetch_array($res))) {				
 				fwrite($fp, base64_decode($r['content']));
 				rewind($fp);
 				return $fp;
 			} else {
 				$this->_fclose($fp, $path);
 			}
-		}		
+		}
+
 		return false;
 	}
-	
+
 	/**
 	 * Close opened file
 	 *
-	 * @param  resource  $fp  file pointer
+	 * @param  resource	 $fp  file pointer
 	 * @return bool
 	 * @author Dmitry (dio) Levashov
 	 **/
@@ -649,51 +641,51 @@ class elFinderVolumeMsSQL extends elFinderVolumeDriver {
 			@unlink($this->getTempFile($path));
 		}
 	}
-	
+
 	/********************  file/dir manipulations *************************/
-	
+
 	/**
 	 * Create dir and return created dir path or false on failed
 	 *
 	 * @param  string  $path  parent dir path
-	 * @param string  $name  new directory name
+	 * @param string  $name	 new directory name
 	 * @return string|bool
 	 * @author Dmitry (dio) Levashov
 	 **/
-	protected function _mkdir($path, $name) {	
+	protected function _mkdir($path, $name) {
 		return $this->make($path, $name, 'directory')? $this->_joinPath($path, $name) : false;
 	}
-	
+
 	/**
 	 * Create file and return it's path or false on failed
 	 *
 	 * @param  string  $path  parent dir path
-	 * @param string  $name  new file name
+	 * @param string  $name	 new file name
 	 * @return string|bool
 	 * @author Dmitry (dio) Levashov
 	 **/
 	protected function _mkfile($path, $name) {
 		return $this->make($path, $name, 'text/plain') ? $this->_joinPath($path, $name) : false;
 	}
-	
+
 	/**
 	 * Create symlink. FTP driver does not support symlinks.
 	 *
-	 * @param  string  $target  link target
-	 * @param  string  $path    symlink path
+	 * @param  string  $target	link target
+	 * @param  string  $path	symlink path
 	 * @return bool
 	 * @author Dmitry (dio) Levashov
 	 **/
 	protected function _symlink($target, $path, $name) {
 		return false;
 	}
-	
+
 	/**
 	 * Copy file into another file
 	 *
-	 * @param  string  $source     source file path
+	 * @param  string  $source	   source file path
 	 * @param  string  $targetDir  target directory path
-	 * @param  string  $name       new file name
+	 * @param  string  $name	   new file name
 	 * @return bool
 	 * @author Dmitry (dio) Levashov
 	 **/
@@ -704,28 +696,27 @@ class elFinderVolumeMsSQL extends elFinderVolumeDriver {
 		$sql = $id > 0
 			? sprintf('REPLACE INTO %s (id, parent_id, name, content, size, mtime, mime, width, height, [read], write, locked, hidden) (SELECT %d, %d, name, content, size, mtime, mime, width, height, [read, write, locked, hidden FROM %s WHERE id=%d)', $this->tbf, $id, $this->_dirname($id), $this->tbf, $source)
 			: sprintf('INSERT INTO %s (parent_id, name, content, size, mtime, mime, width, height, [read], write, locked, hidden) SELECT %d, "%s", content, size, %d, mime, width, height, [read], write, locked, hidden FROM %s WHERE id=%d', $this->tbf, $targetDir, addslashes($name), time(), $this->tbf, $source);
-		$sql = str_replace(utf8_encode('"'), "'", $sql);		
-		return odbc_exec($this->db,$sql);
+
+		return $this->query($sql);
 	}
-	
+
 	/**
 	 * Move file into another parent dir.
 	 * Return new file path or false.
 	 *
-	 * @param  string  $source  source file path
-	 * @param  string  $target  target dir path
-	 * @param  string  $name    file name
+	 * @param  string  $source	source file path
+	 * @param  string  $target	target dir path
+	 * @param  string  $name	file name
 	 * @return string|bool
 	 * @author Dmitry (dio) Levashov
 	 **/
 	protected function _move($source, $targetDir, $name) {
 		$sql = 'UPDATE %s SET parent_id=%d, name="%s" WHERE id=%d';
 		$sql = sprintf($sql, $this->tbf, $targetDir, addslashes($name), $source);
-		$sql = str_replace(utf8_encode('"'), "'", $sql);		
-		$res = odbc_exec($this->db,$sql);
+		$res = $this->query($sql);
 		return $res && odbc_num_rows($res) > 0 ? $source : false;
 	}
-		
+
 	/**
 	 * Remove file
 	 *
@@ -734,9 +725,8 @@ class elFinderVolumeMsSQL extends elFinderVolumeDriver {
 	 * @author Dmitry (dio) Levashov
 	 **/
 	protected function _unlink($path) {
-	$sql = sprintf('DELETE FROM %s WHERE id=%d AND mime!="directory"', $this->tbf, $path);
-	$sql = str_replace(utf8_encode('"'), "'", $sql);	
-	$res = odbc_exec($this->db,$sql); 	
+		$sql = sprintf('DELETE FROM %s WHERE id=%d AND mime!="directory"', $this->tbf, $path);
+		$res = $this->query($sql);
 		return $res && odbc_num_rows($res);
 	}
 
@@ -748,13 +738,11 @@ class elFinderVolumeMsSQL extends elFinderVolumeDriver {
 	 * @author Dmitry (dio) Levashov
 	 **/
 	protected function _rmdir($path) {
-	$sql = sprintf('DELETE FROM %s WHERE id=%d AND mime!="directory"', $this->tbf, $path);
-	$sql = str_replace(utf8_encode('"'), "'", $sql);
-	
-	$res = odbc_exec($this->db,$qry); 
+		$sql = sprintf('DELETE FROM %s WHERE id=%d AND mime!="directory"', $this->tbf, $path);
+		$res = $this->query($qry);
 		return $res && odbc_num_rows($res);
 	}
-	
+
 	/**
 	 * undocumented function
 	 *
@@ -765,91 +753,87 @@ class elFinderVolumeMsSQL extends elFinderVolumeDriver {
 		rewind($fp);
 		$fstat = fstat($fp);
 		$size = $fstat['size'];
-		
-		
+
+
 	}
-	
+
 	/**
 	 * Create new file and write into it from file pointer.
 	 * Return new file path or false on error.
 	 *
-	 * @param  resource  $fp   file pointer
-	 * @param  string    $dir  target dir path
-	 * @param  string    $name file name
-	 * @param  array     $stat file stat (required by some virtual fs)
+	 * @param  resource	 $fp   file pointer
+	 * @param  string	 $dir  target dir path
+	 * @param  string	 $name file name
+	 * @param  array	 $stat file stat (required by some virtual fs)
 	 * @return bool|string
 	 * @author Dmitry (dio) Levashov
 	 **/
 	protected function _save($fp, $dir, $name, $stat) {
-	
+
 		$this->clearcache();
-		
+
 		$mime = $stat['mime'];
-		$w = !empty($stat['width'])  ? $stat['width']  : 0;
+		$w = !empty($stat['width'])	 ? $stat['width']  : 0;
 		$h = !empty($stat['height']) ? $stat['height'] : 0;
-		
-		$id = $this->_joinPath($dir, $name);		
+
+		$id = $this->_joinPath($dir, $name);
 		rewind($fp);
 		$stat = fstat($fp);
-		$size = $stat['size'];		
+		$size = $stat['size'];
 		if (($tmpfile = tempnam($this->tmpPath, $this->id))) {
-			if (($trgfp = fopen($tmpfile, 'wb')) == false) {			
+			if (($trgfp = fopen($tmpfile, 'wb')) == false) {
 				unlink($tmpfile);
-			} else {			
-				while (!feof($fp)) {				
+			} else {
+				while (!feof($fp)) {
 					fwrite($trgfp, fread($fp, 8192));
 				}
 				fclose($trgfp);
-				
+
 				chmod($tmpfile, 0644);
-				
+
 				$sql = $id > 0
 					? 'REPLACE INTO %s (id, parent_id, name, content, size, mtime, mime,[read], write, locked, hidden, width, height) VALUES ('.$id.', %d, "%s", convert(varbinary(max),"%s")), %d, %d, "%s", 1, 1, 0, 0, %d, %d)'
 					: 'INSERT INTO %s (parent_id, name, content, size, mtime, mime,[read], write, locked, hidden, width, height) VALUES (%d, "%s", convert(varbinary(max),"%s")), %d, %d, "%s", 1, 1, 0, 0, %d, %d)';
-				
+
 				$sql = sprintf($sql, $this->tbf, $dir, addslashes($name),$this->loadFilePath($tmpfile), $size, time(), $mime, $w, $h);
-				$sql = str_replace(utf8_encode('"'), "'", $sql); 
-				
-				$res = odbc_exec($this->db,$sql);
-				
+
+				$res = $this->query($sql);
+
 				unlink($tmpfile);
-				
-				if ($res) {	
-					$res = odbc_exec($this->db,"Select IDENT_CURRENT('elfinder_file') as id");
-					$r = odbc_fetch_array($res); 		
+
+				if ($res) {
+					$res = $this->query("Select IDENT_CURRENT('elfinder_file') as id");
+					$r = odbc_fetch_array($res);
 					return $id > 0 ? $id : $r['id'];
 				}
 			}
 		}
 
-		
+
 		$content = '';
 		rewind($fp);
 		while (!feof($fp)) {
 			$content .= fread($fp, 8192);
 		}
-		
+
 		$sql = $id > 0
 			? 'REPLACE INTO %s (id, parent_id, name, content, size, mtime, mime, [read], write, locked, hidden, width, height) VALUES ('.$id.', %d, "%s", convert(varbinary(max),"%s"), %d, %d, "%s", 1, 1, 0, 1, %d, %d)'
 			: 'INSERT INTO %s (parent_id, name, content, size, mtime, mime, [read], write, locked, hidden, width, height) VALUES (%d, "%s", convert(varbinary(max),"%s"), %d, %d, "%s", 1, 1, 0, 0, %d, %d)';
 		$sql = sprintf($sql, $this->tbf, $dir, addslashes($name), base64_encode($content), $size, time(), $mime, $w, $h);
-				
-		unset($content);
-		$sql = str_replace(utf8_encode('"'), "'", $sql);
-			
-		$res = odbc_exec($this->db,$sql);
 		
-		if ($res) {	
-			$res = odbc_exec($this->db,"Select IDENT_CURRENT('elfinder_file') as id");
-			$r = odbc_fetch_array($res); 			
+		unset($content);
+
+		$res = $this->query($sql);
+
+		if ($res) {
+			$res = $this->query("Select IDENT_CURRENT('elfinder_file') as id");
+			$r = odbc_fetch_array($res);
 			return $id > 0 ? $id : $r['id'];
 		}
-		
+
 		return false;
 	}
 
-
-	
 	/**
 	 * Get file contents
 	 *
@@ -858,25 +842,23 @@ class elFinderVolumeMsSQL extends elFinderVolumeDriver {
 	 * @author Dmitry (dio) Levashov
 	 **/
 	protected function _getContents($path) {
-	$sql = sprintf('SELECT convert(varchar(max),content) as content FROM %s WHERE id=%d', $this->tbf, $path);
-	$sql = str_replace(utf8_encode('"'), "'", $sql);	
-	$res = odbc_exec($this->db,$sql);
-	$r = odbc_fetch_array($res); 	
+		$sql = sprintf('SELECT convert(varbinary(max),content) as content FROM %s WHERE id=%d', $this->tbf, $path);
+		$res = $this->query($sql);
+		$r = odbc_fetch_array($res);
 		return ($res) && ($r) ? base64_decode($r['content']) : false;
 	}
-	
+
 	/**
 	 * Write a string to a file
 	 *
-	 * @param  string  $path     file path
-	 * @param  string  $content  new file content
+	 * @param  string  $path	 file path
+	 * @param  string  $content	 new file content
 	 * @return bool
 	 * @author Dmitry (dio) Levashov
 	 **/
 	protected function _filePutContents($path, $content) {
 		$sql = sprintf('UPDATE %s SET content=convert(varbinary(max),"%s"), size=%d, mtime=%d WHERE id=%d', $this->tbf, base64_encode($content), strlen($content), time(), $path);
-		$sql = str_replace(utf8_encode('"'), "'", $sql); 		
-		return odbc_exec($this->db,$sql);
+		return $this->query($sql);
 	}
 
 	/**
@@ -901,7 +883,7 @@ class elFinderVolumeMsSQL extends elFinderVolumeDriver {
 	 * Unpack archive
 	 *
 	 * @param  string  $path  archive path
-	 * @param  array   $arc   archiver command and arguments (same as in $this->archivers)
+	 * @param  array   $arc	  archiver command and arguments (same as in $this->archivers)
 	 * @return void
 	 * @author Dmitry (dio) Levashov
 	 * @author Alexey Sukhotin
@@ -925,150 +907,141 @@ class elFinderVolumeMsSQL extends elFinderVolumeDriver {
 	 * Extract files from archive
 	 *
 	 * @param  string  $path  archive path
-	 * @param  array   $arc   archiver command and arguments (same as in $this->archivers)
+	 * @param  array   $arc	  archiver command and arguments (same as in $this->archivers)
 	 * @return true
-	 * @author Dmitry (dio) Levashov, 
+	 * @author Dmitry (dio) Levashov,
 	 * @author Alexey Sukhotin
 	 **/
 	protected function _extract($path, $arc) {
 		return false;
 	}
-	
+
 	/**
 	 * Create archive and return its path
 	 *
-	 * @param  string  $dir    target dir
+	 * @param  string  $dir	   target dir
 	 * @param  array   $files  files names list
 	 * @param  string  $name   archive name
-	 * @param  array   $arc    archiver options
+	 * @param  array   $arc	   archiver options
 	 * @return string|bool
-	 * @author Dmitry (dio) Levashov, 
+	 * @author Dmitry (dio) Levashov,
 	 * @author Alexey Sukhotin
 	 **/
 	protected function _archive($dir, $files, $name, $arc) {
 		return false;
 	}
-	
+
 	/**
 	 * Update MsSQL database	 *
 	 * @param  update root name with alias
-	 * @param  update read, write, locked, hidden permission	 
-	 * @author Raja Sharma	
+	 * @param  update read, write, locked, hidden permission
+	 * @author Raja Sharma
 	 **/
 	protected function rootparameter($alias, $read, $write, $locked, $hidden) {
-		if($alias == ""){		
-			$sql = 'UPDATE elfinder_file set name = "DATABASE" where id=1';		
+		if($alias == ""){
+			$sql = 'UPDATE elfinder_file set name = "DATABASE" where id=1';
 		} else {
-			$sql = 'UPDATE elfinder_file set name = "'.$alias.'" where id=1';		
+			$sql = 'UPDATE elfinder_file set name = "'.$alias.'" where id=1';
 		}
-		$sql = str_replace(utf8_encode('"'), "'", $sql);			
-		$res = odbc_exec($this->db,$sql);
-				
+		$res = $this->query($sql);
+
 		if($read !== NULL || $read !== ''){
 			$read ==true?$read="1":$read="0";
-			$sql = 'UPDATE elfinder_file set [read] = '.$read;		
+			$sql = 'UPDATE elfinder_file set [read] = '.$read;
 		} else {
-			$sql = 'UPDATE elfinder_file set [read] = 1';		
+			$sql = 'UPDATE elfinder_file set [read] = 1';
 		}
-		$sql = str_replace(utf8_encode('"'), "'", $sql);		
-		$res = odbc_exec($this->db,$sql);
-		
+		$res = $this->query($sql);
+
 		if($write !== NULL || $write !== ''){
 			$write ==true?$write="1":$write="0";
-			$sql = 'UPDATE elfinder_file set write = '.$write;		
+			$sql = 'UPDATE elfinder_file set write = '.$write;
 		} else {
-			$sql = 'UPDATE elfinder_file set write = 1';		
+			$sql = 'UPDATE elfinder_file set write = 1';
 		}
-		$sql = str_replace(utf8_encode('"'), "'", $sql);		
-		$res = odbc_exec($this->db,$sql);
-		
+		$res = $this->query($sql);
+
 		if($locked !== NULL || $locked !== ''){
 			$locked ==true?$locked="1":$locked="0";
-			$sql = 'UPDATE elfinder_file set locked = '.$locked;		
+			$sql = 'UPDATE elfinder_file set locked = '.$locked;
 		} else {
-			$sql = 'UPDATE elfinder_file set locked = 0';		
+			$sql = 'UPDATE elfinder_file set locked = 0';
 		}
-		$sql = str_replace(utf8_encode('"'), "'", $sql);		
-		$res = odbc_exec($this->db,$sql);
-		
+		$res = $this->query($sql);
+
 		if($hidden !== NULL || $hidden !== ''){
 			$hidden ==true?$hidden="1":$hidden="0";
-			$sql = 'UPDATE elfinder_file set hidden = '.$hidden;		
+			$sql = 'UPDATE elfinder_file set hidden = '.$hidden;
 		} else {
-			$sql = 'UPDATE elfinder_file set hidden = 0';		
+			$sql = 'UPDATE elfinder_file set hidden = 0';
 		}
-		$sql = str_replace(utf8_encode('"'), "'", $sql);		
-		$res = odbc_exec($this->db,$sql);
-		
+		$res = $this->query($sql);
+
 
 		// set folder/directory attributes
 		if (!empty($this->options['attributes']) && is_array($this->options['attributes'])) {
 			foreach ($this->options['attributes'] as $a) {
 				if (!empty($a['pattern']) || count($a) > 1) {
-					$pattern = '/[^a-zA-Z0-9;_-]/';					
+					$pattern = '/[^a-zA-Z0-9;_-]/';
 					$str= substr($a['pattern'],strpos($a['pattern'],"^"),strlen($a['pattern']));
 					if(count(preg_split($pattern, $str, -1, PREG_SPLIT_NO_EMPTY))==0){
 						$foldername = preg_split($pattern, $a['pattern'], -1, PREG_SPLIT_NO_EMPTY)[0];
-					
+
 						$a['read']	 ==true?$read="1":$read="2";
 						$a['write']	 ==true?$write="1":$write="2";
 						$a['locked'] ==true?$locked="1":$locked="2";
 						$a['hidden'] ==true?$hidden="1":$hidden="2";
-						$a['filelock'] ==true?$filelock="1":$filelock="2";					
-					
+						$a['filelock'] ==true?$filelock="1":$filelock="2";
+
 						$sql = 'UPDATE elfinder_file set [read] = "'.$read.'", write = "'.$write.'", locked = "'.$locked.'", hidden = "'.$hidden.'" where name ="'.$foldername.'" and mime ="directory"';
-						$sql = str_replace(utf8_encode('"'), "'", $sql);					
-						$res = odbc_exec($this->db,$sql);
+						$res = $this->query($sql);
 						// set files attributes inside directory
 						$sql = 'SELECT * FROM elfinder_file WHERE mime ="directory" and name = "'.$foldername.'"';
-						$sql = str_replace(utf8_encode('"'), "'", $sql);
-						$res = odbc_exec($this->db,$sql);
+						$res = $this->query($sql);
 						$row = odbc_fetch_array($res);
 						$row['parent_id']!==NULL?$parent_id=$row['id']:$parent_id="0";
-											
-						$sql = 'UPDATE elfinder_file set [read] = "'.$read.'", write = "'.$write.'", locked = "'.$filelock.'", hidden = "'.$hidden.'" where  parent_id="'.$parent_id.'"';
-						$sql = str_replace(utf8_encode('"'), "'", $sql);
-						$res = odbc_exec($this->db,$sql);						
-						
-					}
-				}						
-			}		
-		}
-		
-		
-		// set files attributes
-		if (!empty($this->options['attributes']) && is_array($this->options['attributes'])) {
-			
-			foreach ($this->options['attributes'] as $a) {
-					// attributes must contain pattern and at least one rule
-					if (!empty($a['pattern']) || count($a) > 1) {						
-						$pattern = '/[^a-zA-Z0-9;._-]/';
-						$rootfolderpath = explode("/^",$a['pattern'])[0];						
-						
-						$sql = 'SELECT * FROM elfinder_file WHERE mime ="directory" and name = "'.$rootfolderpath.'"';
-						$sql = str_replace(utf8_encode('"'), "'", $sql);
-						$res = odbc_exec($this->db,$sql);
-						$row = odbc_fetch_array($res);
-												
-						$row['id']!==NULL?$id=$row['id']:$id="0";
-						$row['parent_id']!==NULL?$parent_id=$row['id']:$parent_id="0";						
-						
-						$a['read'] ==true?$read="1":$read="2";
-						$a['write'] ==true?$write="1":$write="2";
-						$a['locked'] ==true?$locked="1":$locked="2";
-						$a['hidden'] ==true?$hidden="1":$hidden="2";
-						
-						$filename = explode("/^",$a['pattern'])[1];						
-						$filename = preg_split($pattern, $filename, -1, PREG_SPLIT_NO_EMPTY);
-						foreach ($filename as $value){					
-						$sql = 'UPDATE elfinder_file set [read] = "'.$read.'", write = "'.$write.'", locked = "'.$locked.'", hidden = "'.$hidden.'" where name REGEXP "'.$value.'" and parent_id="'.$parent_id.'"';
-						$sql = str_replace(utf8_encode('"'), "'", $sql);
-						$res = odbc_exec($this->db,$sql);											
-						}
+
+						$sql = 'UPDATE elfinder_file set [read] = "'.$read.'", write = "'.$write.'", locked = "'.$filelock.'", hidden = "'.$hidden.'" where	 parent_id="'.$parent_id.'"';
+						$res = $this->query($sql);
+
 					}
 				}
-		}		
+			}
+		}
+
+
+		// set files attributes
+		if (!empty($this->options['attributes']) && is_array($this->options['attributes'])) {
+
+			foreach ($this->options['attributes'] as $a) {
+				// attributes must contain pattern and at least one rule
+				if (!empty($a['pattern']) || count($a) > 1) {
+					$pattern = '/[^a-zA-Z0-9;._-]/';
+					$rootfolderpath = explode("/^",$a['pattern'])[0];
+
+					$sql = 'SELECT * FROM elfinder_file WHERE mime ="directory" and name = "'.$rootfolderpath.'"';
+					$res = $this->query($sql);
+					$row = odbc_fetch_array($res);
+
+					$row['id']!==NULL?$id=$row['id']:$id="0";
+					$row['parent_id']!==NULL?$parent_id=$row['id']:$parent_id="0";
+
+					$a['read'] ==true?$read="1":$read="2";
+					$a['write'] ==true?$write="1":$write="2";
+					$a['locked'] ==true?$locked="1":$locked="2";
+					$a['hidden'] ==true?$hidden="1":$hidden="2";
+
+					$filename = explode("/^",$a['pattern'])[1];
+					$filename = preg_split($pattern, $filename, -1, PREG_SPLIT_NO_EMPTY);
+					foreach ($filename as $value){
+						$sql = 'UPDATE elfinder_file set [read] = "'.$read.'", write = "'.$write.'", locked = "'.$locked.'", hidden = "'.$hidden.'" where name REGEXP "'.$value.'" and parent_id="'.$parent_id.'"';
+						$res = $this->query($sql);
+					}
+				}
+			}
+		}
 	return;
- }	
+ }
+
+} // END class
  
-} // END class 
