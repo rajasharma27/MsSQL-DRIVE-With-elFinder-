@@ -62,3 +62,4 @@ INSERT INTO elfinder_file
 ('0', 'DATABASE', convert(varbinary(max),''), '0', '', 'directory', '1', '1', '0', '0', '0', '0');
 
 SELECT * from elfinder_file
+
